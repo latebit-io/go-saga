@@ -15,7 +15,7 @@ This library provides:
 ## Installation
 
 ```bash
-go get github.com/latebit-io/saga-client
+go get github.com/latebit-io/go-saga
 ```
 
 ## Quick Start
