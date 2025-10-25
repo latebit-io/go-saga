@@ -1,4 +1,4 @@
-module github.com/latebit-io/saga-client
+module github.com/latebit-io/go-saga
 
 go 1.24
 
