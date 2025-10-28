@@ -114,25 +114,38 @@ func (s *Saga[T]) AddStep(name string, execute, compensate func(ctx context.Cont
 	return s
 }
 
-// TODO: load state
+func LoadSaga[T any](ctx context.Context, sagaStore SagaStateStore, sagaID string, data *T) (*Saga[T], error) {
+	state, err := sagaStore.LoadState(ctx, sagaID)
+	if err != nil {
+		return nil, err
+	}
+
+	err = json.Unmarshal(state.Data, data)
+	if err != nil {
+		return nil, err
+	}
+
+	saga := NewSaga(sagaStore, sagaID, data)
+	saga.State = *state
+
+	return saga, nil
+}
+
 // LoadState loads a saved state
-func (s *Saga[T]) LoadState(sagaID string) *Saga[T] {
-	s.useState = false
-	// sagaState, err := s.loadState(ctx, s.SagaID)
-	// if err != nil {
-	// 	s.logger.Log("error", fmt.Sprintf("Failed to load state: %v", err))
-	// }
+func (s *Saga[T]) LoadState(ctx context.Context) error {
+	state, err := s.stateStore.LoadState(ctx, s.SagaID)
+	if err != nil {
+		return err
+	}
 
-	// if sagaState != nil {
-	// 	err = json.Unmarshal(sagaState.Data, s.Data)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	useState = true
-	// }
-	// s.logger.Log("info", fmt.Sprintf("Using loaded state %t", useState))
+	err = json.Unmarshal(state.Data, s.Data)
+	if err != nil {
+		return err
+	}
 
-	return s
+	s.State = *state
+
+	return nil
 }
 
 // Execute runs the saga
