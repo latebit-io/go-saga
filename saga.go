@@ -84,9 +84,10 @@ func (l *DefaultLogger) Log(level string, msg string) {
 }
 
 // NewSaga creates a new saga instance with default FailFast strategy
-func NewSaga[T any](stateStore SagaStateStore, sagaID string, data *T) *Saga[T] {
+func NewSaga[T any](stateStore SagaStateStore, sagaID string, data *T) (*Saga[T], error) {
 	state := NewSagaState(sagaID)
-	return &Saga[T]{
+
+	saga := &Saga[T]{
 		SagaID:               sagaID,
 		Steps:                make([]*SagaStep[T], 0),
 		Data:                 data,
@@ -95,6 +96,16 @@ func NewSaga[T any](stateStore SagaStateStore, sagaID string, data *T) *Saga[T] 
 		logger:               NewDefaultLogger(log.Default()),
 		compensationStrategy: NewFailFastStrategy[T](),
 	}
+	err := saga.LoadState(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
+	if saga.State.CompensatedStatus == complete || saga.State.Status == complete {
+		return nil, fmt.Errorf("saga is completed and cannot be used: %s", saga.SagaID)
+	}
+
+	return saga, nil
 }
 
 // WithCompensationStrategy sets the compensation strategy for the saga (fluent API)
@@ -112,23 +123,6 @@ func (s *Saga[T]) AddStep(name string, execute, compensate func(ctx context.Cont
 	}
 	s.Steps = append(s.Steps, step)
 	return s
-}
-
-func LoadSaga[T any](ctx context.Context, sagaStore SagaStateStore, sagaID string, data *T) (*Saga[T], error) {
-	state, err := sagaStore.LoadState(ctx, sagaID)
-	if err != nil {
-		return nil, err
-	}
-
-	err = json.Unmarshal(state.Data, data)
-	if err != nil {
-		return nil, err
-	}
-
-	saga := NewSaga(sagaStore, sagaID, data)
-	saga.State = *state
-
-	return saga, nil
 }
 
 // LoadState loads a saved state
@@ -150,6 +144,10 @@ func (s *Saga[T]) LoadState(ctx context.Context) error {
 
 // Execute runs the saga
 func (s *Saga[T]) Execute(ctx context.Context) error {
+	s.LoadState(ctx)
+	if s.State.CompensatedStatus == complete || s.State.Status == complete {
+		return fmt.Errorf("cannot execute completed sagaID: %s", s.SagaID)
+	}
 	s.State.TotalSteps = len(s.Steps)
 	for i, step := range s.Steps {
 		s.State.CurrentStep = i + 1
@@ -175,6 +173,9 @@ func (s *Saga[T]) Execute(ctx context.Context) error {
 }
 
 func (s *Saga[T]) Compensate(ctx context.Context) error {
+	if s.State.CompensatedStatus == complete || s.State.Status == complete {
+		return fmt.Errorf("cannot compensate completed sagaID: %s", s.SagaID)
+	}
 	return s.compensationStrategy.Compensate(ctx, *s)
 }
 
