@@ -3,9 +3,12 @@ package gosaga
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 type SagaStatus string
@@ -98,7 +101,10 @@ func NewSaga[T any](stateStore SagaStateStore, sagaID string, data *T) (*Saga[T]
 	}
 	err := saga.LoadState(context.Background())
 	if err != nil {
-		return nil, err
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
+		saga.logger.Log("info", err.Error())
 	}
 
 	if saga.State.CompensatedStatus == complete || saga.State.Status == complete {
