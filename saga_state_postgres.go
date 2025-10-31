@@ -3,6 +3,7 @@ package gosaga
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -97,25 +98,49 @@ func (s *PostgresSagaStore) LoadState(ctx context.Context, sagaID string) (*Saga
 	state := &SagaState{}
 
 	err := s.pool.QueryRow(ctx, query, sagaID).Scan(
-		state.SagaID,
-
-		state.TotalSteps,
-		state.Status,
-		state.Data,
-		state.FailedStep,
-		state.CompensatedSteps,
-		state.CompensatedStatus,
-		state.CreatedAt,
-		time.Now(),
+		&state.SagaID,
+		&state.CurrentStep,
+		&state.TotalSteps,
+		&state.Status,
+		&state.Data,
+		&state.FailedStep,
+		&state.CompensatedSteps,
+		&state.CompensatedStatus,
+		&state.CreatedAt,
+		&state.UpdatedAt,
 	)
 
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrSagaNotFound // Translate to your error
+		}
 		return nil, err
 	}
 
 	return state, nil
 }
 
-func (s *PostgresSagaStore) MarkComplete(ctx context.Context, sagaID string) error {
+func (s *PostgresSagaStore) CreateSchema(ctx context.Context) error {
+	query :=
+		`CREATE TABLE IF NOT EXISTS saga_states (
+	    	saga_id VARCHAR(36) PRIMARY KEY,
+	     	current_step INT NOT NULL DEFAULT 0,
+	      	total_steps INT NOT NULL DEFAULT 0,
+	       	status VARCHAR(50) NOT NULL,
+	        data JSONB NOT NULL,
+	        failed_step INT NULL,
+	        compensated_steps INT[] NOT NULL DEFAULT '{}',
+	        compensated_status VARCHAR(50) NULL,
+	        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+	        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+		);
+    	CREATE INDEX IF NOT EXISTS idx_saga_states_status ON saga_states(status);
+     	CREATE INDEX IF NOT EXISTS idx_saga_states_updated_at ON saga_states(updated_at);
+    `
+
+	_, err := s.pool.Exec(ctx, query)
+	if err != nil {
+		return err
+	}
 	return nil
 }

@@ -3,7 +3,6 @@ package gosaga
 import (
 	"context"
 	"errors"
-	"fmt"
 	"testing"
 	"time"
 )
@@ -38,7 +37,7 @@ func TestRetryStrategy_Compensate_Success(t *testing.T) {
 	strategy := NewRetryStrategy[string](config)
 	saga := createTestSaga(2, false)
 
-	err := strategy.Compensate(context.Background(), saga)
+	err := strategy.Compensate(context.Background(), &saga)
 	if err != nil {
 		t.Errorf("Expected no error, got %v", err)
 	}
@@ -56,7 +55,7 @@ func TestRetryStrategy_Compensate_FailureAfterRetries(t *testing.T) {
 	strategy := NewRetryStrategy[string](config)
 	saga := createTestSaga(2, true)
 
-	err := strategy.Compensate(context.Background(), saga)
+	err := strategy.Compensate(context.Background(), &saga)
 	if err == nil {
 		t.Error("Expected error, got nil")
 	}
@@ -77,7 +76,7 @@ func TestRetryStrategy_Compensate_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 
-	err := strategy.Compensate(ctx, saga)
+	err := strategy.Compensate(ctx, &saga)
 	if err == nil {
 		t.Error("Expected context cancellation error, got nil")
 	}
@@ -95,7 +94,7 @@ func TestContinueAllStrategy_Compensate_Success(t *testing.T) {
 	strategy := NewContinueAllStrategy[string](config)
 	saga := createTestSaga(3, false)
 
-	err := strategy.Compensate(context.Background(), saga)
+	err := strategy.Compensate(context.Background(), &saga)
 	if err != nil {
 		t.Errorf("Expected no error, got %v", err)
 	}
@@ -113,7 +112,7 @@ func TestContinueAllStrategy_Compensate_PartialFailure(t *testing.T) {
 	strategy := NewContinueAllStrategy[string](config)
 	saga := createMixedTestSaga()
 
-	err := strategy.Compensate(context.Background(), saga)
+	err := strategy.Compensate(context.Background(), &saga)
 	if err == nil {
 		t.Error("Expected error, got nil")
 	}
@@ -134,7 +133,7 @@ func TestFailFastStrategy_Compensate_Success(t *testing.T) {
 	strategy := NewFailFastStrategy[string]()
 	saga := createTestSaga(2, false)
 
-	err := strategy.Compensate(context.Background(), saga)
+	err := strategy.Compensate(context.Background(), &saga)
 	if err != nil {
 		t.Errorf("Expected no error, got %v", err)
 	}
@@ -145,7 +144,7 @@ func TestFailFastStrategy_Compensate_Failure(t *testing.T) {
 	strategy := NewFailFastStrategy[string]()
 	saga := createTestSaga(2, true)
 
-	err := strategy.Compensate(context.Background(), saga)
+	err := strategy.Compensate(context.Background(), &saga)
 	if err == nil {
 		t.Error("Expected error, got nil")
 	}
@@ -304,5 +303,5 @@ type consoleLogger struct{}
 
 func (c *consoleLogger) Log(level string, message string) {
 	// Silent logger for tests
-	fmt.Sprintf("%s: %s", level, message)
+	//fmt.Sprintf("%s: %s", level, message)
 }
