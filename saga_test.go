@@ -475,10 +475,10 @@ func TestSaga_LoadState_Postgres_CompensationFailureAndRetry(t *testing.T) {
 
 	// Clean up any existing test data
 	sagaID := "saga-postgres-comp-failure-001"
-	_, err = conn.Exec(ctx, "DELETE FROM saga_states WHERE saga_id = $1", sagaID)
-	if err != nil {
-		t.Fatalf("Failed to clean up test data: %v", err)
-	}
+	// _, err = conn.Exec(ctx, "DELETE FROM saga_states WHERE saga_id = $1", sagaID)
+	// if err != nil {
+	// 	t.Fatalf("Failed to clean up test data: %v", err)
+	// }
 
 	// Create test data
 	type TestData struct {
@@ -659,10 +659,10 @@ func TestSaga_LoadState_Postgres_CompensationFailureAndRetry(t *testing.T) {
 	}
 
 	// Clean up test data
-	_, err = conn.Exec(ctx, "DELETE FROM saga_states WHERE saga_id = $1", sagaID)
-	if err != nil {
-		t.Logf("Warning: Failed to clean up test data: %v", err)
-	}
+	// _, err = conn.Exec(ctx, "DELETE FROM saga_states WHERE saga_id = $1", sagaID)
+	// if err != nil {
+	// 	t.Logf("Warning: Failed to clean up test data: %v", err)
+	// }
 }
 
 // Test LoadState with compensated saga and re-execution

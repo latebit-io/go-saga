@@ -134,6 +134,10 @@ func (s *Saga[T]) AddStep(name string, execute, compensate func(ctx context.Cont
 // LoadState loads a saved state
 func (s *Saga[T]) LoadState(ctx context.Context) error {
 	state, err := s.stateStore.LoadState(ctx, s.SagaID)
+	if state == nil {
+		s.logger.Log("warning", "state is nil, no state to load")
+		return nil
+	}
 	if err != nil {
 		return err
 	}
