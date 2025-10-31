@@ -3,6 +3,7 @@ package gosaga
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -110,14 +111,13 @@ func (s *PostgresSagaStore) LoadState(ctx context.Context, sagaID string) (*Saga
 	)
 
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrSagaNotFound // Translate to your error
+		}
 		return nil, err
 	}
 
 	return state, nil
-}
-
-func (s *PostgresSagaStore) MarkComplete(ctx context.Context, sagaID string) error {
-	return nil
 }
 
 func (s *PostgresSagaStore) CreateSchema(ctx context.Context) error {

@@ -15,9 +15,5 @@ func (s *NoStateStore) SaveState(ctx context.Context, state *SagaState) error {
 }
 
 func (s *NoStateStore) LoadState(ctx context.Context, sagaID string) (*SagaState, error) {
-	return nil, nil
-}
-
-func (s *NoStateStore) MarkComplete(ctx context.Context, sagaID string) error {
-	return nil
+	return nil, ErrSagaNotFound
 }

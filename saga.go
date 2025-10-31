@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"log"
 	"time"
-
-	"github.com/jackc/pgx/v5"
 )
+
+var ErrSagaNotFound = errors.New("saga state not found")
 
 type SagaStatus string
 
@@ -38,13 +38,11 @@ type Saga[T any] struct {
 	compensationStrategy CompensationStrategy[T]
 	stateStore           SagaStateStore
 	metadata             map[string]string
-	useState             bool
 }
 
 type SagaStateStore interface {
 	SaveState(ctx context.Context, state *SagaState) error
 	LoadState(ctx context.Context, sagaID string) (*SagaState, error)
-	MarkComplete(ctx context.Context, sagaID string) error
 }
 
 type SagaState struct {
@@ -87,7 +85,7 @@ func (l *DefaultLogger) Log(level string, msg string) {
 }
 
 // NewSaga creates a new saga instance with default FailFast strategy
-func NewSaga[T any](stateStore SagaStateStore, sagaID string, data *T) (*Saga[T], error) {
+func LoadOrCreateNewSaga[T any](ctx context.Context, stateStore SagaStateStore, sagaID string, data *T) (*Saga[T], error) {
 	state := NewSagaState(sagaID)
 
 	saga := &Saga[T]{
@@ -99,9 +97,9 @@ func NewSaga[T any](stateStore SagaStateStore, sagaID string, data *T) (*Saga[T]
 		logger:               NewDefaultLogger(log.Default()),
 		compensationStrategy: NewFailFastStrategy[T](),
 	}
-	err := saga.LoadState(context.Background())
+	err := saga.LoadState(ctx)
 	if err != nil {
-		if !errors.Is(err, pgx.ErrNoRows) {
+		if !errors.Is(err, ErrSagaNotFound) {
 			return nil, err
 		}
 		saga.logger.Log("info", err.Error())
@@ -154,7 +152,6 @@ func (s *Saga[T]) LoadState(ctx context.Context) error {
 
 // Execute runs the saga
 func (s *Saga[T]) Execute(ctx context.Context) error {
-	s.LoadState(ctx)
 	if s.State.CompensatedStatus == complete || s.State.Status == complete {
 		return fmt.Errorf("cannot execute completed sagaID: %s", s.SagaID)
 	}
@@ -186,7 +183,7 @@ func (s *Saga[T]) Compensate(ctx context.Context) error {
 	if s.State.CompensatedStatus == complete || s.State.Status == complete {
 		return fmt.Errorf("cannot compensate completed sagaID: %s", s.SagaID)
 	}
-	return s.compensationStrategy.Compensate(ctx, *s)
+	return s.compensationStrategy.Compensate(ctx, s)
 }
 
 func (s *Saga[T]) SaveState(ctx context.Context) error {

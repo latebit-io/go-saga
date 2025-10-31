@@ -8,7 +8,7 @@ import (
 
 // CompensationStrategy defines how to handle compensation failures
 type CompensationStrategy[T any] interface {
-	Compensate(ctx context.Context, saga Saga[T]) error
+	Compensate(ctx context.Context, saga *Saga[T]) error
 }
 
 // CompensationResult tracks the result of compensating a single step
@@ -48,7 +48,7 @@ func NewRetryStrategy[T any](config RetryConfig) *RetryStrategy[T] {
 	return &RetryStrategy[T]{config: config}
 }
 
-func (r *RetryStrategy[T]) Compensate(ctx context.Context, saga Saga[T]) error {
+func (r *RetryStrategy[T]) Compensate(ctx context.Context, saga *Saga[T]) error {
 	// Compensate in reverse order
 	for i := saga.State.FailedStep - 1; i >= 0; i-- {
 		step := saga.Steps[i]
@@ -110,7 +110,7 @@ func NewContinueAllStrategy[T any](retryConfig RetryConfig) *ContinueAllStrategy
 	return &ContinueAllStrategy[T]{retryConfig: retryConfig}
 }
 
-func (c *ContinueAllStrategy[T]) Compensate(ctx context.Context, saga Saga[T]) error {
+func (c *ContinueAllStrategy[T]) Compensate(ctx context.Context, saga *Saga[T]) error {
 	var compensationErrors []CompensationResult
 	retryHelper := NewRetryStrategy[T](c.retryConfig)
 
@@ -161,7 +161,7 @@ func NewFailFastStrategy[T any]() *FailFastStrategy[T] {
 	return &FailFastStrategy[T]{}
 }
 
-func (f *FailFastStrategy[T]) Compensate(ctx context.Context, saga Saga[T]) error {
+func (f *FailFastStrategy[T]) Compensate(ctx context.Context, saga *Saga[T]) error {
 	for i := saga.State.FailedStep - 1; i >= 0; i-- {
 		step := saga.Steps[i]
 		saga.State.CompensatedSteps = append(saga.State.CompensatedSteps, i)

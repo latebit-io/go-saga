@@ -54,7 +54,7 @@ func TestNewSaga(t *testing.T) {
 	sagaID := "saga-001"
 	stateStore := NewNoStateStore()
 
-	saga, _ := NewSaga(stateStore, sagaID, &data)
+	saga, _ := LoadOrCreateNewSaga(context.Background(), stateStore, sagaID, &data)
 
 	if saga.SagaID != sagaID {
 		t.Errorf("Expected SagaID to be %s, got %s", sagaID, saga.SagaID)
@@ -82,7 +82,7 @@ func TestNewSaga(t *testing.T) {
 // Test AddStep
 func TestSaga_AddStep(t *testing.T) {
 	data := "test"
-	saga, _ := NewSaga(NewNoStateStore(), "saga-002", &data)
+	saga, _ := LoadOrCreateNewSaga(context.Background(), NewNoStateStore(), "saga-002", &data)
 
 	executeFunc := func(ctx context.Context, data *string) error {
 		return nil
@@ -112,7 +112,7 @@ func TestSaga_AddStep(t *testing.T) {
 // Test WithCompensationStrategy
 func TestSaga_WithCompensationStrategy(t *testing.T) {
 	data := "test"
-	saga, _ := NewSaga(NewNoStateStore(), "saga-003", &data)
+	saga, _ := LoadOrCreateNewSaga(context.Background(), NewNoStateStore(), "saga-003", &data)
 
 	retryStrategy := NewRetryStrategy[string](DefaultRetryConfig())
 	saga.WithCompensationStrategy(retryStrategy)
@@ -125,7 +125,7 @@ func TestSaga_WithCompensationStrategy(t *testing.T) {
 // Test Execute success
 func TestSaga_Execute_Success(t *testing.T) {
 	data := "initial"
-	saga, _ := NewSaga(NewNoStateStore(), "saga-004", &data)
+	saga, _ := LoadOrCreateNewSaga(context.Background(), NewNoStateStore(), "saga-004", &data)
 
 	step1Executed := false
 	step2Executed := false
@@ -178,7 +178,7 @@ func TestSaga_Execute_Success(t *testing.T) {
 // Test Execute failure
 func TestSaga_Execute_Failure(t *testing.T) {
 	data := "initial"
-	saga, _ := NewSaga(NewNoStateStore(), "saga-005", &data)
+	saga, _ := LoadOrCreateNewSaga(context.Background(), NewNoStateStore(), "saga-005", &data)
 
 	step1Executed := false
 	step2Executed := false
@@ -235,7 +235,7 @@ func TestSaga_Execute_Failure(t *testing.T) {
 // Test Execute with context cancellation
 func TestSaga_Execute_ContextCancelled(t *testing.T) {
 	data := "initial"
-	saga, _ := NewSaga(NewNoStateStore(), "saga-006", &data)
+	saga, _ := LoadOrCreateNewSaga(context.Background(), NewNoStateStore(), "saga-006", &data)
 
 	saga.AddStep("step1",
 		func(ctx context.Context, data *string) error {
@@ -269,7 +269,7 @@ func TestSaga_SaveState(t *testing.T) {
 	}
 
 	data := TestData{Value: "test", Count: 42}
-	saga, _ := NewSaga(NewNoStateStore(), "saga-007", &data)
+	saga, _ := LoadOrCreateNewSaga(context.Background(), NewNoStateStore(), "saga-007", &data)
 
 	err := saga.SaveState(context.Background())
 
@@ -284,7 +284,7 @@ func TestSaga_SaveState(t *testing.T) {
 // Test SaveState with unmarshalable data
 func TestSaga_SaveState_MarshalError(t *testing.T) {
 	data := make(chan int)
-	saga, _ := NewSaga(NewNoStateStore(), "saga-008", &data)
+	saga, _ := LoadOrCreateNewSaga(context.Background(), NewNoStateStore(), "saga-008", &data)
 
 	err := saga.SaveState(context.Background())
 
@@ -296,7 +296,7 @@ func TestSaga_SaveState_MarshalError(t *testing.T) {
 // Test Compensate
 func TestSaga_Compensate(t *testing.T) {
 	data := "test"
-	saga, _ := NewSaga(NewNoStateStore(), "saga-009", &data)
+	saga, _ := LoadOrCreateNewSaga(context.Background(), NewNoStateStore(), "saga-009", &data)
 
 	compensated := false
 
@@ -325,16 +325,14 @@ func TestSaga_Compensate(t *testing.T) {
 // Test LoadState
 func TestSaga_LoadState(t *testing.T) {
 	data := "test"
-	saga, _ := NewSaga(NewNoStateStore(), "saga-011", &data)
+	saga, _ := LoadOrCreateNewSaga(context.Background(), NewNoStateStore(), "saga-011", &data)
 
 	result := saga.LoadState(context.Background())
 
-	if result == nil {
-		t.Error("Expected non-nil result")
+	if result != nil {
+		t.Error("Expected nil result")
 	}
-	if saga.useState {
-		t.Error("Expected useState to be false")
-	}
+
 }
 
 // Test LoadState with Postgres store
@@ -374,7 +372,7 @@ func TestSaga_LoadState_Postgres(t *testing.T) {
 
 	postgresStore := NewPostgresSagaStore(conn)
 	postgresStore.CreateSchema(ctx)
-	saga, _ := NewSaga(postgresStore, sagaID, &data)
+	saga, _ := LoadOrCreateNewSaga(ctx, postgresStore, sagaID, &data)
 
 	// Add some steps
 	saga.AddStep("step1",
@@ -414,10 +412,10 @@ func TestSaga_LoadState_Postgres(t *testing.T) {
 
 	// Now create a new saga instance and load the state
 	newData := TestData{}
-	newSaga, _ := NewSaga(postgresStore, sagaID, &newData)
+	newSaga, err := LoadOrCreateNewSaga(ctx, postgresStore, sagaID, &newData)
 
 	// Load the state from postgres
-	err = newSaga.LoadState(ctx)
+	//err = newSaga.LoadState(ctx)
 	if err != nil {
 		t.Fatalf("Failed to load state: %v", err)
 	}
@@ -475,10 +473,10 @@ func TestSaga_LoadState_Postgres_CompensationFailureAndRetry(t *testing.T) {
 
 	// Clean up any existing test data
 	sagaID := "saga-postgres-comp-failure-001"
-	// _, err = conn.Exec(ctx, "DELETE FROM saga_states WHERE saga_id = $1", sagaID)
-	// if err != nil {
-	// 	t.Fatalf("Failed to clean up test data: %v", err)
-	// }
+	_, err = conn.Exec(ctx, "DELETE FROM saga_states WHERE saga_id = $1", sagaID)
+	if err != nil {
+		t.Fatalf("Failed to clean up test data: %v", err)
+	}
 
 	// Create test data
 	type TestData struct {
@@ -501,7 +499,7 @@ func TestSaga_LoadState_Postgres_CompensationFailureAndRetry(t *testing.T) {
 
 	postgresStore := NewPostgresSagaStore(conn)
 	postgresStore.CreateSchema(ctx)
-	saga, err := NewSaga(postgresStore, sagaID, &data)
+	saga, err := LoadOrCreateNewSaga(ctx, postgresStore, sagaID, &data)
 	if err != nil {
 		t.Fatalf("error creating sage %v", err)
 	}
@@ -584,7 +582,7 @@ func TestSaga_LoadState_Postgres_CompensationFailureAndRetry(t *testing.T) {
 		FailOnStep3:           false, // This time step3 won't fail
 		FailOnStep1Compensate: false, // This time compensation will succeed
 	}
-	newSaga, err := NewSaga(postgresStore, sagaID, &newData)
+	newSaga, err := LoadOrCreateNewSaga(ctx, postgresStore, sagaID, &newData)
 	if err != nil {
 		t.Error(err)
 	}
@@ -659,10 +657,10 @@ func TestSaga_LoadState_Postgres_CompensationFailureAndRetry(t *testing.T) {
 	}
 
 	// Clean up test data
-	// _, err = conn.Exec(ctx, "DELETE FROM saga_states WHERE saga_id = $1", sagaID)
-	// if err != nil {
-	// 	t.Logf("Warning: Failed to clean up test data: %v", err)
-	// }
+	_, err = conn.Exec(ctx, "DELETE FROM saga_states WHERE saga_id = $1", sagaID)
+	if err != nil {
+		t.Logf("Warning: Failed to clean up test data: %v", err)
+	}
 }
 
 // Test LoadState with compensated saga and re-execution
@@ -712,7 +710,7 @@ func TestSaga_LoadState_Postgres_CompensatedAndRetry(t *testing.T) {
 
 	postgresStore := NewPostgresSagaStore(conn)
 	postgresStore.CreateSchema(ctx)
-	saga, err := NewSaga(postgresStore, sagaID, &data)
+	saga, err := LoadOrCreateNewSaga(ctx, postgresStore, sagaID, &data)
 	if err != nil {
 		t.Fatalf("exiting test %v", err)
 	}
@@ -783,9 +781,9 @@ func TestSaga_LoadState_Postgres_CompensatedAndRetry(t *testing.T) {
 	newData := TestData{
 		FailOnStep2: false, // This time we won't fail
 	}
-	newSaga, err := NewSaga(postgresStore, sagaID, &newData)
+	newSaga, err := LoadOrCreateNewSaga(ctx, postgresStore, sagaID, &newData)
 	if err != nil {
-		t.Error(err)
+		t.Fatalf("%v", err)
 	}
 
 	// Load the compensated state
