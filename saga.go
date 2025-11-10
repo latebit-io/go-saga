@@ -97,7 +97,7 @@ func LoadOrCreateNewSaga[T any](ctx context.Context, stateStore SagaStateStore, 
 		logger:               NewDefaultLogger(log.Default()),
 		compensationStrategy: NewFailFastStrategy[T](),
 	}
-	err := saga.LoadState(ctx)
+	err := saga.loadState(ctx)
 	if err != nil {
 		if !errors.Is(err, ErrSagaNotFound) {
 			return nil, err
@@ -130,10 +130,10 @@ func (s *Saga[T]) AddStep(name string, execute, compensate func(ctx context.Cont
 }
 
 // LoadState loads a saved state
-func (s *Saga[T]) LoadState(ctx context.Context) error {
+func (s *Saga[T]) loadState(ctx context.Context) error {
 	state, err := s.stateStore.LoadState(ctx, s.SagaID)
 	if state == nil {
-		s.logger.Log("warning", "state is nil, no state to load")
+		s.logger.Log("info", "state is nil, no state to load")
 		return nil
 	}
 	if err != nil {

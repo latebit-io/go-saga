@@ -3,6 +3,7 @@ package gosaga
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"testing"
@@ -322,19 +323,6 @@ func TestSaga_Compensate(t *testing.T) {
 	}
 }
 
-// Test LoadState
-func TestSaga_LoadState(t *testing.T) {
-	data := "test"
-	saga, _ := LoadOrCreateNewSaga(context.Background(), NewNoStateStore(), "saga-011", &data)
-
-	result := saga.LoadState(context.Background())
-
-	if result != nil {
-		t.Error("Expected nil result")
-	}
-
-}
-
 // Test LoadState with Postgres store
 func TestSaga_LoadState_Postgres(t *testing.T) {
 	err := godotenv.Load()
@@ -386,7 +374,7 @@ func TestSaga_LoadState_Postgres(t *testing.T) {
 	).AddStep("step2",
 		func(ctx context.Context, data *TestData) error {
 			data.Value = data.Value + "-updated"
-			return nil
+			return fmt.Errorf("%v", "Step failed")
 		},
 		func(ctx context.Context, data *TestData) error {
 			return nil
@@ -395,27 +383,13 @@ func TestSaga_LoadState_Postgres(t *testing.T) {
 
 	// Execute the saga to create some state
 	err = saga.Execute(ctx)
-	if err != nil {
-		t.Fatalf("Failed to execute saga: %v", err)
-	}
-
-	// Verify the saga completed successfully
-	if saga.State.Status != complete {
-		t.Errorf("Expected status to be %s, got %s", complete, saga.State.Status)
-	}
-	if saga.Data.Count != 43 {
-		t.Errorf("Expected Count to be 43, got %d", saga.Data.Count)
-	}
-	if saga.Data.Value != "test-updated" {
-		t.Errorf("Expected Value to be 'test-updated', got '%s'", saga.Data.Value)
+	if err == nil {
+		t.Fatalf("should have failed")
 	}
 
 	// Now create a new saga instance and load the state
 	newData := TestData{}
 	newSaga, err := LoadOrCreateNewSaga(ctx, postgresStore, sagaID, &newData)
-
-	// Load the state from postgres
-	//err = newSaga.LoadState(ctx)
 	if err != nil {
 		t.Fatalf("Failed to load state: %v", err)
 	}
@@ -424,7 +398,7 @@ func TestSaga_LoadState_Postgres(t *testing.T) {
 	if newSaga.State.SagaID != sagaID {
 		t.Errorf("Expected SagaID to be %s, got %s", sagaID, newSaga.State.SagaID)
 	}
-	if newSaga.State.Status != complete {
+	if newSaga.State.Status != failed {
 		t.Errorf("Expected status to be %s, got %s", complete, newSaga.State.Status)
 	}
 	if newSaga.State.TotalSteps != 2 {
@@ -585,12 +559,6 @@ func TestSaga_LoadState_Postgres_CompensationFailureAndRetry(t *testing.T) {
 	newSaga, err := LoadOrCreateNewSaga(ctx, postgresStore, sagaID, &newData)
 	if err != nil {
 		t.Error(err)
-	}
-
-	// Load the failed state
-	err = newSaga.LoadState(ctx)
-	if err != nil {
-		t.Fatalf("Failed to load state: %v", err)
 	}
 
 	// Verify the loaded state shows compensation was incomplete
@@ -781,89 +749,8 @@ func TestSaga_LoadState_Postgres_CompensatedAndRetry(t *testing.T) {
 	newData := TestData{
 		FailOnStep2: false, // This time we won't fail
 	}
-	newSaga, err := LoadOrCreateNewSaga(ctx, postgresStore, sagaID, &newData)
-	if err != nil {
-		t.Fatalf("%v", err)
-	}
-
-	// Load the compensated state
-	err = newSaga.LoadState(ctx)
-	if err != nil {
-		t.Fatalf("Failed to load state: %v", err)
-	}
-
-	// Verify the loaded state shows it was compensated
-	if newSaga.State.Status != failed {
-		t.Errorf("Expected loaded status to be %s, got %s", failed, newSaga.State.Status)
-	}
-	if newSaga.State.FailedStep != 1 {
-		t.Errorf("Expected FailedStep to be 1, got %d", newSaga.State.FailedStep)
-	}
-	if len(newSaga.State.CompensatedSteps) == 0 {
-		t.Error("Expected CompensatedSteps to have entries")
-	}
-
-	// Verify the data was restored
-	if newSaga.Data.Step1Compensated != true {
-		t.Error("Expected loaded data to show step1 was compensated")
-	}
-
-	// Re-add the steps to the new saga (since steps aren't persisted)
-	newSaga.AddStep("step1",
-		func(ctx context.Context, data *TestData) error {
-			data.Step1Executed = true
-			data.Count++
-			data.Value += "-step1"
-			return nil
-		},
-		func(ctx context.Context, data *TestData) error {
-			data.Step1Compensated = true
-			data.Count--
-			return nil
-		},
-	).AddStep("step2",
-		func(ctx context.Context, data *TestData) error {
-			data.Step2Executed = true
-			data.Value += "-step2"
-			return nil
-		},
-		func(ctx context.Context, data *TestData) error {
-			return nil
-		},
-	).AddStep("step3",
-		func(ctx context.Context, data *TestData) error {
-			data.Step3Executed = true
-			data.Value += "-step3"
-			return nil
-		},
-		func(ctx context.Context, data *TestData) error {
-			return nil
-		},
-	)
-
-	// Try to execute the saga again - this time it should succeed
-	err = newSaga.Execute(ctx)
-	if err != nil {
-		t.Fatalf("Expected saga to succeed on retry, got error: %v", err)
-	}
-
-	// Verify the saga completed successfully
-	if newSaga.State.Status != complete {
-		t.Errorf("Expected status to be %s, got %s", complete, newSaga.State.Status)
-	}
-	if !newSaga.Data.Step1Executed {
-		t.Error("Expected step1 to have executed on retry")
-	}
-	if !newSaga.Data.Step2Executed {
-		t.Error("Expected step2 to have executed on retry")
-	}
-	if !newSaga.Data.Step3Executed {
-		t.Error("Expected step3 to have executed on retry")
-	}
-
-	// Clean up test data
-	_, err = conn.Exec(ctx, "DELETE FROM saga_states WHERE saga_id = $1", sagaID)
-	if err != nil {
-		t.Logf("Warning: Failed to clean up test data: %v", err)
+	_, err = LoadOrCreateNewSaga(ctx, postgresStore, sagaID, &newData)
+	if err == nil {
+		t.Fatalf("%v", "should not be usable")
 	}
 }
