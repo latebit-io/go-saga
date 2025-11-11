@@ -3,7 +3,6 @@ package gosaga
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"os"
 	"testing"
@@ -327,7 +326,7 @@ func TestSaga_Compensate(t *testing.T) {
 func TestSaga_LoadState_Postgres(t *testing.T) {
 	err := godotenv.Load()
 	if err != nil {
-		log.Fatal("Error loading .env file")
+		t.Log("Error loading .env file")
 	}
 	// Skip if no database connection is available
 	dbURL := os.Getenv("DATABASE_URL")
@@ -360,8 +359,10 @@ func TestSaga_LoadState_Postgres(t *testing.T) {
 
 	postgresStore := NewPostgresSagaStore(conn)
 	postgresStore.CreateSchema(ctx)
-	saga, _ := LoadOrCreateNewSaga(ctx, postgresStore, sagaID, &data)
-
+	saga, err := LoadOrCreateNewSaga(ctx, postgresStore, sagaID, &data)
+	if err != nil {
+		t.Error(err)
+	}
 	// Add some steps
 	saga.AddStep("step1",
 		func(ctx context.Context, data *TestData) error {
@@ -374,7 +375,7 @@ func TestSaga_LoadState_Postgres(t *testing.T) {
 	).AddStep("step2",
 		func(ctx context.Context, data *TestData) error {
 			data.Value = data.Value + "-updated"
-			return fmt.Errorf("%v", "Step failed")
+			return errors.New("Step failed")
 		},
 		func(ctx context.Context, data *TestData) error {
 			return nil
@@ -399,7 +400,7 @@ func TestSaga_LoadState_Postgres(t *testing.T) {
 		t.Errorf("Expected SagaID to be %s, got %s", sagaID, newSaga.State.SagaID)
 	}
 	if newSaga.State.Status != failed {
-		t.Errorf("Expected status to be %s, got %s", complete, newSaga.State.Status)
+		t.Errorf("Expected status to be %s, got %s", failed, newSaga.State.Status)
 	}
 	if newSaga.State.TotalSteps != 2 {
 		t.Errorf("Expected TotalSteps to be 2, got %d", newSaga.State.TotalSteps)
