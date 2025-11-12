@@ -9,6 +9,7 @@ This library provides:
 - Type-safe saga orchestration using Go generics
 - Multiple compensation strategies (Retry, FailFast, ContinueAll)
 - Pluggable state persistence
+- State loading and saga resumption
 - Context-aware execution
 - Fluent API for building sagas
 
@@ -42,7 +43,12 @@ func main() {
     }
 
     // Create a new saga with no state persistence
-    saga := NewSaga(NewNoStateStore(), "order-saga-123", data)
+    // LoadOrCreateNewSaga will load existing state if found, or create a new saga
+    saga, err := LoadOrCreateNewSaga(context.Background(), NewNoStateStore(), "order-saga-123", data)
+    if err != nil {
+        fmt.Printf("Failed to load or create saga: %v\n", err)
+        return
+    }
 
     // Add steps with execute and compensate functions
     saga.AddStep("reserve-inventory",
@@ -92,12 +98,22 @@ func main() {
 
 ### Saga Creation
 
-Create a saga with a state store, unique ID, and data:
+Create or load a saga with a state store, unique ID, and data:
 
 ```go
 data := &MyData{}
-saga := NewSaga(stateStore, "saga-id", data)
+saga, err := LoadOrCreateNewSaga(ctx, stateStore, "saga-id", data)
+if err != nil {
+    // Handle error - could be a database error or saga already completed
+    return err
+}
 ```
+
+The `LoadOrCreateNewSaga` function will:
+- Load existing saga state if found in the state store
+- Create a new saga if no state exists
+- Return an error if the saga is already completed
+- Populate the data object with the saved state
 
 ### Adding Steps
 
@@ -139,7 +155,7 @@ if err != nil {
 Stops compensation immediately on first failure.
 
 ```go
-saga := NewSaga(stateStore, "saga-id", data)
+saga, err := LoadOrCreateNewSaga(ctx, stateStore, "saga-id", data)
 // FailFast is the default strategy
 ```
 
@@ -200,7 +216,10 @@ if compErr, ok := IsCompensationError(err); ok {
 For simple cases or testing:
 
 ```go
-saga := NewSaga(NewNoStateStore(), "saga-id", data)
+saga, err := LoadOrCreateNewSaga(ctx, NewNoStateStore(), "saga-id", data)
+if err != nil {
+    return err
+}
 ```
 
 ### PostgreSQL State Store
@@ -211,7 +230,10 @@ For production use with state persistence:
 db, _ := sql.Open("postgres", connectionString)
 stateStore := NewPostgresStateStore(db)
 
-saga := NewSaga(stateStore, "saga-id", data)
+saga, err := LoadOrCreateNewSaga(ctx, stateStore, "saga-id", data)
+if err != nil {
+    return err
+}
 ```
 
 The PostgreSQL store requires a table:
@@ -239,11 +261,38 @@ Implement the `SagaStateStore` interface:
 type SagaStateStore interface {
     SaveState(ctx context.Context, state *SagaState) error
     LoadState(ctx context.Context, sagaID string) (*SagaState, error)
-    MarkComplete(ctx context.Context, sagaID string) error
 }
 ```
 
 ## Advanced Usage
+
+### Resuming Sagas
+
+When using a persistent state store, sagas can be resumed after failures:
+
+```go
+// First execution - saga fails at step 2
+data := &MyData{}
+saga, err := LoadOrCreateNewSaga(ctx, stateStore, "saga-123", data)
+saga.AddStep("step1", execute1, compensate1)
+saga.AddStep("step2", execute2, compensate2)  // Fails here
+saga.AddStep("step3", execute3, compensate3)
+
+err := saga.Execute(ctx)  // Fails at step 2
+
+// Later - resume the same saga
+data := &MyData{}
+saga, err := LoadOrCreateNewSaga(ctx, stateStore, "saga-123", data)
+// The data will be populated with the saved state
+// Add the same steps again
+saga.AddStep("step1", execute1, compensate1)
+saga.AddStep("step2", execute2Fixed, compensate2)  // Fixed version
+saga.AddStep("step3", execute3, compensate3)
+
+err := saga.Execute(ctx)  // Continues from step 1
+```
+
+**Note**: Completed sagas (either successfully executed or fully compensated) cannot be resumed and will return an error.
 
 ### Custom Logger
 
@@ -281,7 +330,10 @@ type PaymentFlow struct {
 }
 
 data := &PaymentFlow{}
-saga := NewSaga[PaymentFlow](stateStore, "payment-123", data)
+saga, err := LoadOrCreateNewSaga[PaymentFlow](ctx, stateStore, "payment-123", data)
+if err != nil {
+    return err
+}
 ```
 
 ## Error Handling
@@ -339,7 +391,10 @@ type Order struct {
     OrderConfirmed  bool
 }
 
-saga := NewSaga(stateStore, "order-"+orderID, &order)
+saga, err := LoadOrCreateNewSaga(ctx, stateStore, "order-"+orderID, &order)
+if err != nil {
+    return err
+}
 
 saga.AddStep("lock-inventory",
     func(ctx context.Context, o *Order) error {
@@ -395,7 +450,10 @@ type Transfer struct {
     Credited    bool
 }
 
-saga := NewSaga(stateStore, "transfer-"+txID, &transfer)
+saga, err := LoadOrCreateNewSaga(ctx, stateStore, "transfer-"+txID, &transfer)
+if err != nil {
+    return err
+}
 
 saga.AddStep("debit-account",
     func(ctx context.Context, t *Transfer) error {
@@ -422,13 +480,15 @@ saga.AddStep("debit-account",
 
 1. **Idempotency**: Ensure both execute and compensate functions are idempotent
 2. **Error Handling**: Always handle compensation errors - they may require manual intervention
-3. **State Persistence**: Use a persistent state store in production
-4. **Timeouts**: Set appropriate context timeouts for long-running operations
-5. **Logging**: Implement custom loggers for production monitoring
-6. **Compensation Strategy**: Choose the right strategy for your use case
+3. **State Persistence**: Use a persistent state store in production to enable saga resumption
+4. **Unique Saga IDs**: Use unique, meaningful saga IDs that allow you to identify and resume specific saga instances
+5. **Timeouts**: Set appropriate context timeouts for long-running operations
+6. **Logging**: Implement custom loggers for production monitoring
+7. **Compensation Strategy**: Choose the right strategy for your use case
    - `FailFast`: When you need immediate awareness of compensation issues
    - `Retry`: When transient failures are expected
    - `ContinueAll`: When partial compensation is acceptable
+8. **Saga Resumption**: Design your execute functions to be resumable - they should handle cases where previous steps may have already completed
 
 ## License
 
