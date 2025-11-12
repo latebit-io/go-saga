@@ -3,10 +3,13 @@ package gosaga
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"time"
 )
+
+var ErrSagaNotFound = errors.New("saga state not found")
 
 type SagaStatus string
 
@@ -35,13 +38,11 @@ type Saga[T any] struct {
 	compensationStrategy CompensationStrategy[T]
 	stateStore           SagaStateStore
 	metadata             map[string]string
-	useState             bool
 }
 
 type SagaStateStore interface {
 	SaveState(ctx context.Context, state *SagaState) error
 	LoadState(ctx context.Context, sagaID string) (*SagaState, error)
-	MarkComplete(ctx context.Context, sagaID string) error
 }
 
 type SagaState struct {
@@ -84,9 +85,10 @@ func (l *DefaultLogger) Log(level string, msg string) {
 }
 
 // NewSaga creates a new saga instance with default FailFast strategy
-func NewSaga[T any](stateStore SagaStateStore, sagaID string, data *T) *Saga[T] {
+func LoadOrCreateNewSaga[T any](ctx context.Context, stateStore SagaStateStore, sagaID string, data *T) (*Saga[T], error) {
 	state := NewSagaState(sagaID)
-	return &Saga[T]{
+
+	saga := &Saga[T]{
 		SagaID:               sagaID,
 		Steps:                make([]*SagaStep[T], 0),
 		Data:                 data,
@@ -95,6 +97,19 @@ func NewSaga[T any](stateStore SagaStateStore, sagaID string, data *T) *Saga[T] 
 		logger:               NewDefaultLogger(log.Default()),
 		compensationStrategy: NewFailFastStrategy[T](),
 	}
+	err := saga.loadState(ctx)
+	if err != nil {
+		if !errors.Is(err, ErrSagaNotFound) {
+			return nil, err
+		}
+		saga.logger.Log("info", err.Error())
+	}
+
+	if saga.State.CompensatedStatus == complete || saga.State.Status == complete {
+		return nil, fmt.Errorf("saga is completed and cannot be used: %s", saga.SagaID)
+	}
+
+	return saga, nil
 }
 
 // WithCompensationStrategy sets the compensation strategy for the saga (fluent API)
@@ -114,29 +129,34 @@ func (s *Saga[T]) AddStep(name string, execute, compensate func(ctx context.Cont
 	return s
 }
 
-// TODO: load state
 // LoadState loads a saved state
-func (s *Saga[T]) LoadState(sagaID string) *Saga[T] {
-	s.useState = false
-	// sagaState, err := s.loadState(ctx, s.SagaID)
-	// if err != nil {
-	// 	s.logger.Log("error", fmt.Sprintf("Failed to load state: %v", err))
-	// }
+func (s *Saga[T]) loadState(ctx context.Context) error {
+	state, err := s.stateStore.LoadState(ctx, s.SagaID)
 
-	// if sagaState != nil {
-	// 	err = json.Unmarshal(sagaState.Data, s.Data)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	useState = true
-	// }
-	// s.logger.Log("info", fmt.Sprintf("Using loaded state %t", useState))
+	if err != nil {
+		return err
+	}
 
-	return s
+	if state == nil {
+		s.logger.Log("info", "state is nil, no state to load")
+		return nil
+	}
+
+	err = json.Unmarshal(state.Data, s.Data)
+	if err != nil {
+		return err
+	}
+
+	s.State = *state
+
+	return nil
 }
 
 // Execute runs the saga
 func (s *Saga[T]) Execute(ctx context.Context) error {
+	if s.State.CompensatedStatus == complete || s.State.Status == complete {
+		return fmt.Errorf("cannot execute completed sagaID: %s", s.SagaID)
+	}
 	s.State.TotalSteps = len(s.Steps)
 	for i, step := range s.Steps {
 		s.State.CurrentStep = i + 1
@@ -162,7 +182,10 @@ func (s *Saga[T]) Execute(ctx context.Context) error {
 }
 
 func (s *Saga[T]) Compensate(ctx context.Context) error {
-	return s.compensationStrategy.Compensate(ctx, *s)
+	if s.State.CompensatedStatus == complete || s.State.Status == complete {
+		return fmt.Errorf("cannot compensate completed sagaID: %s", s.SagaID)
+	}
+	return s.compensationStrategy.Compensate(ctx, s)
 }
 
 func (s *Saga[T]) SaveState(ctx context.Context) error {
